@@ -1,0 +1,61 @@
+import spectral.io.envi as envi
+from spectral.algorithms.detectors import matched_filter, ace
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
+from spectral import *
+import matplotlib.pyplot as plt
+import cv2
+import numpy as np
+
+
+def rotate_and_crop_band(band, angle, start_y, end_y, start_x, end_x):
+    """
+    Rotates and crops a single band of the hyperspectral image.
+
+    Parameters:
+    - band: A single band (2D array) of the hyperspectral cube.
+    - angle: Rotation angle in degrees (counterclockwise).
+    - start_y, end_y, start_x, end_x: Coordinates for cropping.
+
+    Returns:
+    - The rotated and cropped band as a 2D array.
+    """
+    # Calculate the center of the band
+    height, width = band.shape
+    center = (width / 2, height / 2)
+
+    # Get the rotation matrix and perform the rotation
+    rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated_band = cv2.warpAffine(band, rotation_matrix, (width, height))
+
+    # Crop the band
+    cropped_band = rotated_band[start_y:end_y, start_x:end_x]
+    return cropped_band
+
+
+def rotate_and_crop_cube(data_cube_path, angle, start_y, end_y, start_x, end_x):
+    img = envi.open(data_cube_path + '.hdr')
+    data_cube = img.load()
+
+    processed_bands = []
+
+    for i in range(data_cube.shape[0]):  # Loop through all the bands
+        band = data_cube.read_band(i)  # Read the individual band
+
+        # Skip bands that are not 2D (e.g., have a third dimension with size 0)
+        if band.ndim != 2 or band.shape[-1] == 0:
+            print(f"Skipping band {i} due to abnormal shape: {band.shape}")
+            continue  # Skip this band and move to the next
+
+        processed_band = rotate_and_crop_band(band, angle, start_y, end_y, start_x, end_x)
+        processed_bands.append(processed_band)
+
+    # If no bands were processed, return None or raise an error
+    if not processed_bands:
+        print("No valid bands were processed.")
+        return None  # Or raise an exception
+
+    processed_cube = np.stack(processed_bands, axis=0)
+    save_path = 'processed_cube'
+    envi.save_image(save_path + '.hdr', processed_cube, dtype='float32', force=True, interleave='bsq')
+
