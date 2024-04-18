@@ -7,7 +7,7 @@ from docx import Document
 from docx.shared import Inches
 import matplotlib.pyplot as plt
 import numpy as np
-
+import pickle
 
 def compute_cov_matrix(hyper_cube, m_cube):
     rows, cols, bands = hyper_cube.shape
@@ -130,10 +130,10 @@ def add_table(NT, WT):
             row_cells[i].text = str(cell_data)
 
 
-def histogram_plot(NT_results, WT_results, string_1, string2):
+def histogram_plot(NT_results, WT_results, string_1, string2, bins):
     # Calculate histograms without plotting them
-    axis = np.linspace(-1000, 1500, 101)
-    ACE_axis = np.linspace(-100, 200, 101)
+    axis = np.linspace(-1000, 1500, bins+1)
+    ACE_axis = np.linspace(-150, 500, bins+1)
     if "ACE" in string_1:
         NT_counts, NT_bins = np.histogram(NT_results, ACE_axis)
         WT_counts, WT_bins = np.histogram(WT_results, ACE_axis)
@@ -186,6 +186,7 @@ def ace_algorithm(cube, t_T, invers_cov, x_m):
     # Calculate the denominator for the ACE algorithm
     denominator_t = np.sqrt(np.dot(t_t_invers_cov, t_T.T))
 
+
     for i in range(rows):
         for j in range(cols):
             # Select the pixel spectrum
@@ -206,10 +207,33 @@ def ace_algorithm(cube, t_T, invers_cov, x_m):
     return ace_scores
 
 
-# File paths
-hdr_path = "converted_cube.hdr"  # Update this path
-dat_path = "converted_cube.img"  # ENVI data file path, update this
 
+def match_filter(t_i_NT, t_i_WT,inv_covariance_matrix):
+    MatchFilter_NT = np.zeros((rows, col))
+    MatchFilter_WT = np.zeros((rows, col))
+    temp = np.dot(t_T, inv_covariance_matrix)
+    for i in range(rows):
+        for j in range(col):
+            MatchFilter_NT[i, j] = np.dot(temp, t_i_NT[i, j, :])
+            MatchFilter_WT[i, j] = np.dot(temp, t_i_WT[i, j, :])
+
+    return MatchFilter_NT, MatchFilter_WT
+
+
+# File paths
+hdr_path = "converted_cube.hdr"
+dat_path = "converted_cube.img"
+
+# Path to the saved mean pixels file
+filename = 'mean_pixels.pkl'
+
+# Load the mean pixels from the file
+with open(filename, 'rb') as f:
+    mean_pixels = pickle.load(f)
+
+# Optionally convert it to a numpy array, though it should already be one if it was saved as such
+mean_pixels_array = np.array(mean_pixels)
+mean_pixels_array = mean_pixels_array[3],mean_pixels_array[4]
 # Create a new Word Document
 doc = Document()
 
@@ -217,24 +241,25 @@ doc = Document()
 cube = load_cube(hdr_path, dat_path)
 rows, col, bands = cube.shape
 
-# targets = [(485, 25), (652,97),(410, 136)]
-targets = [(485, 25)]
+# targets = [(485, 25), (652, 97), (410, 136)]
+targets = [(652,97)]
 
-for i in range(len(targets)):
+for i in range(len(mean_pixels_array)):
     # Target pixel location (2, 4) in zero-indexed coordinates is (4, 2) in (lines, samples)
-    target_pixel_location = targets[i]
-    target_pixel_str = str(target_pixel_location)
-    doc.add_paragraph(f"Target pixel {target_pixel_str}")
-    target_pixel_spectrum = cube[target_pixel_location[0], target_pixel_location[1], :]
-
+    # target_pixel_location = targets[i]
+    # target_pixel_str = str(target_pixel_location)
+    # doc.add_paragraph(f"Target pixel {target_pixel_str}")
+    # target_pixel_spectrum = cube[target_pixel_location[0], target_pixel_location[1], :]
+    target_pixel_spectrum = mean_pixels_array[i]
+    target_pixel_str = f"mean pixel in segment{i}"
     # Plot the spectrum of the target pixel
     plot_spectrum_graph(target_pixel_spectrum)
-
 
     # Calculate the m_vector if it's not already saved
     m_vector_filepath = 'm_vector.npy'  # Replace with your desired file path
 
-    if not os.path.exists(m_vector_filepath):  # Check if the file doesn't exist
+    # Check if m_vector file doesn't exist
+    if not os.path.exists(m_vector_filepath):
         print("Calculating the m_vector...")
         m_vector = compute_m(cube)
         np.save(m_vector_filepath, m_vector)  # Save the m_vector to a file for later use
@@ -242,11 +267,12 @@ for i in range(len(targets)):
     else:
         print(f"m_vector already exists. Loading from {m_vector_filepath}")
         m_vector = np.load(m_vector_filepath)  # Load the m_vector from the file
-    p = 0.015  # Target strength
+    p = 0.01  # Target strength
 
     # calculate the target implant matrix
     t_i_NT_filepath = 't_i_NT.npy'  # Replace with your desired file path
 
+    # Check if target implant matrix file doesn't exist
     if not os.path.exists(t_i_NT_filepath):  # Check if the file doesn't exist
         print("Calculating the target implant matrix...")
         t_i_NT = cube - m_vector  # x' = x - m
@@ -257,17 +283,16 @@ for i in range(len(targets)):
         t_i_NT = np.load(t_i_NT_filepath)  # Load the m_vector from the file
     print("calculate the target implant matrix")
 
-    t_i_WT = t_i_NT + p * target_pixel_spectrum  # x' = x - m +p*t
+    # x' = x - m +p*t
+    t_i_WT = t_i_NT + p * target_pixel_spectrum
 
     # Reshape target_implant_NT to a 2D array where each row is a pixel and each column is a band
     target_implant_2D = t_i_NT.reshape(-1, t_i_NT.shape[2])
 
     # Compute the covariance matrix across all pixels (each pixel is an observation)
-    ##covariance_matrix = np.cov(target_implant_2D, rowvar=False)
     covariance_matrix = compute_cov_matrix(cube, m_vector)
     inv_covariance_matrix = np.linalg.inv(covariance_matrix)
     t_T = target_pixel_spectrum.transpose()
-    t = target_pixel_spectrum
     temp = np.dot(t_T, inv_covariance_matrix)
 
     MatchFilter_NT = np.zeros((rows,col))
@@ -295,16 +320,16 @@ for i in range(len(targets)):
     MatchFilter_WT_flat = MatchFilter_WT.flatten()
     ACE_WT_flat = ACE_WT.flatten()
     ACE_NT_flat = ACE_NT.flatten()
-
+    bins = 100
     # Histogram of Match Filter with/without target.
-    MF_NT_counts, MF_WT_counts = histogram_plot(MatchFilter_NT_flat, MatchFilter_WT_flat, "MatchFilter_NT_flat", "MatchFilter_WT_flat")
-    ACE_NT_counts, ACE_WT_counts = histogram_plot(ACE_NT_flat, ACE_WT_flat, "ACE_Filter_NT_flat", "ACE_Filter_WT_flat")
-
+    MF_NT_counts, MF_WT_counts = histogram_plot(MatchFilter_NT_flat, MatchFilter_WT_flat, "MatchFilter_NT_flat", "MatchFilter_WT_flat", bins)
+    ACE_NT_counts, ACE_WT_counts = histogram_plot(ACE_NT_flat, ACE_WT_flat, "ACE_Filter_NT_flat", "ACE_Filter_WT_flat", bins)
 
     X, Y, n_bands = cube.shape
     x_size = len(MatchFilter_WT)
     y_size = len(MatchFilter_NT)
-    axs = np.linspace(-1000, 1500, 101)
+
+    axs = np.linspace(-1000, 1500, bins+1)
 
     Pd_MF = 1 - integrate.cumulative_trapezoid(MF_WT_counts, axs[:-1], initial=0) / (25 * X * Y)
     Pfa_MF = 1 - integrate.cumulative_trapezoid(MF_NT_counts, axs[:-1], initial=0) / (25 * X * Y)
@@ -330,5 +355,5 @@ for i in range(len(targets)):
     doc.add_picture(f"plot{target_pixel_str}.png", width=Inches(6))
 
     # Save the Word document
-doc.save('report2.docx')
+doc.save('report3.docx')
 
