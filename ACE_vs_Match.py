@@ -8,6 +8,8 @@ from docx.shared import Inches
 import matplotlib.pyplot as plt
 import numpy as np
 import pickle
+from datetime import datetime
+
 
 def compute_cov_matrix(hyper_cube, m_cube):
     rows, cols, bands = hyper_cube.shape
@@ -71,29 +73,12 @@ def plot_spectrum_graph(spectrum):
     plt.plot(range(len(spectrum)), spectrum)
     plt.xlabel('Channel')
     plt.ylabel('Spectral Response')
-    plt.title('Spectrum Graph of the Target Pixel')
+    plt.title(f'Spectrum Graph of the Target Pixel - {target_pixel_str}')
     plt.grid(True)
     plt.savefig(f"Target_pixel_spec{target_pixel_str}.png", bbox_inches='tight')
     plt.close()  # Close the plot to avoid displaying it in the Python output
     # Add the plot image to the Word document
     doc.add_picture(f"Target_pixel_spec{target_pixel_str}.png", width=Inches(6))
-
-
-def show_img(cube):
-    # Normalize the bands to [0, 1] range and select bands for RGB visualization
-    red_normalized = (cube[:, :, 29] - cube[:, :, 29].min()) / (cube[:, :, 29].max() - cube[:, :, 29].min())
-    green_normalized = (cube[:, :, 19] - cube[:, :, 19].min()) / (cube[:, :, 19].max() - cube[:, :, 19].min())
-    blue_normalized = (cube[:, :, 9] - cube[:, :, 9].min()) / (cube[:, :, 9].max() - cube[:, :, 9].min())
-
-    # Stack the bands to create an RGB image
-    rgb_image = np.stack([red_normalized, green_normalized, blue_normalized], axis=-1)
-
-    # Plotting the RGB image
-    plt.figure(figsize=(8, 8))
-    plt.imshow(rgb_image)
-    plt.title('RGB Representation of Hyper-Spectral Image')
-    plt.axis('off')  # To turn off axis labels and ticks
-    plt.show()
 
 
 def add_table(NT, WT):
@@ -143,7 +128,7 @@ def histogram_plot(NT_results, WT_results, string_1, string2, bins):
         plt.plot(ACE_axis[:-1], WT_counts, label='WT')
         plt.xlabel('Value')
         plt.ylabel('Density')
-        plt.title('Continuous Histogram of {} and {}, traget pixel: {}'.format(string_1, string2, target_pixel_str))
+        plt.title('Histogram of {} and {}'.format(string_1, string2))
         plt.legend()
         plt.savefig(f"plot{target_pixel_str}.png", bbox_inches='tight')
         plt.close()  # Close the plot to avoid displaying it in the Python output
@@ -158,7 +143,7 @@ def histogram_plot(NT_results, WT_results, string_1, string2, bins):
         plt.plot(axis[:-1], WT_counts, label='WT')
         plt.xlabel('Value')
         plt.ylabel('Density')
-        plt.title('Continuous Histogram of {} and {}, traget pixel: {}'.format(string_1, string2, target_pixel_str))
+        plt.title('Continuous Histogram of {} and {}'.format(string_1, string2))
         plt.legend()
         plt.savefig(f"plot{target_pixel_str}.png", bbox_inches='tight')
         plt.close()  # Close the plot to avoid displaying it in the Python output
@@ -207,7 +192,6 @@ def ace_algorithm(cube, t_T, invers_cov, x_m):
     return ace_scores
 
 
-
 def match_filter(t_i_NT, t_i_WT,inv_covariance_matrix):
     MatchFilter_NT = np.zeros((rows, col))
     MatchFilter_WT = np.zeros((rows, col))
@@ -230,10 +214,7 @@ filename = 'mean_pixels.pkl'
 # Load the mean pixels from the file
 with open(filename, 'rb') as f:
     mean_pixels = pickle.load(f)
-
-# Optionally convert it to a numpy array, though it should already be one if it was saved as such
-mean_pixels_array = np.array(mean_pixels)
-mean_pixels_array = mean_pixels_array[3],mean_pixels_array[4]
+mean_pixels = [mean_pixels[3]]
 # Create a new Word Document
 doc = Document()
 
@@ -241,119 +222,159 @@ doc = Document()
 cube = load_cube(hdr_path, dat_path)
 rows, col, bands = cube.shape
 
-# targets = [(485, 25), (652, 97), (410, 136)]
-targets = [(652,97)]
+# targets = [(743,16), (485, 25), (652, 97), (410, 136), (740, 23)]
 
-for i in range(len(mean_pixels_array)):
-    # Target pixel location (2, 4) in zero-indexed coordinates is (4, 2) in (lines, samples)
-    # target_pixel_location = targets[i]
-    # target_pixel_str = str(target_pixel_location)
-    # doc.add_paragraph(f"Target pixel {target_pixel_str}")
-    # target_pixel_spectrum = cube[target_pixel_location[0], target_pixel_location[1], :]
-    target_pixel_spectrum = mean_pixels_array[i]
-    target_pixel_str = f"mean pixel in segment{i}"
-    # Plot the spectrum of the target pixel
-    plot_spectrum_graph(target_pixel_spectrum)
+targets = [(410, 136)]
+# Calculate the m_vector if it's not already saved
+m_vector_filepath = 'm_vector.npy'
 
-    # Calculate the m_vector if it's not already saved
-    m_vector_filepath = 'm_vector.npy'  # Replace with your desired file path
+# Check if m_vector file doesn't exist
+if not os.path.exists(m_vector_filepath):
+    print("Calculating the m_vector...")
+    m_vector = compute_m(cube)
+    np.save(m_vector_filepath, m_vector)  # Save the m_vector to a file for later use
+    print(f"m_vector saved to {m_vector_filepath}")
+else:
+    print(f"m_vector already exists. Loading from {m_vector_filepath}")
+    m_vector = np.load(m_vector_filepath)  # Load the m_vector from the file
 
-    # Check if m_vector file doesn't exist
-    if not os.path.exists(m_vector_filepath):
-        print("Calculating the m_vector...")
-        m_vector = compute_m(cube)
-        np.save(m_vector_filepath, m_vector)  # Save the m_vector to a file for later use
-        print(f"m_vector saved to {m_vector_filepath}")
-    else:
-        print(f"m_vector already exists. Loading from {m_vector_filepath}")
-        m_vector = np.load(m_vector_filepath)  # Load the m_vector from the file
-    p = 0.01  # Target strength
+# p = 0.01  # Target strength
+Target_strength = [0.01, 0.02, 0.03]
+# calculate the target implant matrix
+t_i_NT_filepath = 't_i_NT.npy'  # Replace with your desired file path
 
-    # calculate the target implant matrix
-    t_i_NT_filepath = 't_i_NT.npy'  # Replace with your desired file path
+# Check if target implant matrix file doesn't exist
+if not os.path.exists(t_i_NT_filepath):  # Check if the file doesn't exist
+    print("Calculating the target implant matrix...")
+    t_i_NT = cube - m_vector  # x' = x - m
+    np.save(t_i_NT_filepath, t_i_NT)  # Save the target implant to a file for later use
+    print(f"target implant matrix saved to {t_i_NT_filepath}")
+else:
+    print(f"target implant matrix already exists. Loading from {t_i_NT_filepath}")
+    t_i_NT = np.load(t_i_NT_filepath)  # Load the m_vector from the file
+print("calculate the target implant matrix")
+for p in Target_strength:
+    doc.add_paragraph(f"Target strength {str(p)}")
+    for i in range(len(mean_pixels)):
+        now = datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        print("Current Time =", current_time)
+        # Target pixel location (2, 4) in zero-indexed coordinates is (4, 2) in (lines, samples)
+        # target_pixel_location = targets[i]
+        # target_pixel_str = str(target_pixel_location)
+        # doc.add_paragraph(f"Target pixel {target_pixel_str}")
+        # target_pixel_spectrum = cube[target_pixel_location[0], target_pixel_location[1], :]
+        target_pixel_spectrum = mean_pixels[i]
+        target_pixel_str = f"mean pixel in segment 4"
+        # Plot the spectrum of the target pixel
+        plot_spectrum_graph(target_pixel_spectrum)
 
-    # Check if target implant matrix file doesn't exist
-    if not os.path.exists(t_i_NT_filepath):  # Check if the file doesn't exist
-        print("Calculating the target implant matrix...")
-        t_i_NT = cube - m_vector  # x' = x - m
-        np.save(t_i_NT_filepath, t_i_NT)  # Save the target implant to a file for later use
-        print(f"target implant matrix saved to {t_i_NT_filepath}")
-    else:
-        print(f"target implant matrix already exists. Loading from {t_i_NT_filepath}")
-        t_i_NT = np.load(t_i_NT_filepath)  # Load the m_vector from the file
-    print("calculate the target implant matrix")
+        now = datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        print("Current Time =", current_time)
 
-    # x' = x - m +p*t
-    t_i_WT = t_i_NT + p * target_pixel_spectrum
+        # x' = x - m +p*t
+        t_i_WT = t_i_NT + p * target_pixel_spectrum
 
-    # Reshape target_implant_NT to a 2D array where each row is a pixel and each column is a band
-    target_implant_2D = t_i_NT.reshape(-1, t_i_NT.shape[2])
+        # Reshape target_implant_NT to a 2D array where each row is a pixel and each column is a band
+        # target_implant_2D = t_i_NT.reshape(-1, t_i_NT.shape[2])
 
-    # Compute the covariance matrix across all pixels (each pixel is an observation)
-    covariance_matrix = compute_cov_matrix(cube, m_vector)
-    inv_covariance_matrix = np.linalg.inv(covariance_matrix)
-    t_T = target_pixel_spectrum.transpose()
-    temp = np.dot(t_T, inv_covariance_matrix)
+        # Compute the covariance matrix across all pixels (each pixel is an observation)
+        covariance_matrix = compute_cov_matrix(cube, m_vector)
+        inv_covariance_matrix = np.linalg.inv(covariance_matrix)
+        t_T = target_pixel_spectrum.transpose()
+        temp = np.dot(t_T, inv_covariance_matrix)
 
-    MatchFilter_NT = np.zeros((rows,col))
-    MatchFilter_WT = np.zeros((rows,col))
-    ACE_NT = np.zeros((rows,col))
-    ACE_WT = np.zeros((rows,col))
+        now = datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        print("Current Time =", current_time)
 
-    for i in range(rows):
-        for j in range(col):
-            MatchFilter_NT[i,j] = np.dot(temp, t_i_NT[i, j, :])
-            MatchFilter_WT[i,j] = np.dot(temp, t_i_WT[i, j, :])
-    ACE_WT = ace_algorithm(cube, t_T, inv_covariance_matrix, t_i_WT)
-    ACE_NT = ace_algorithm(cube, t_T, inv_covariance_matrix, t_i_NT)
+        MatchFilter_NT = np.zeros((rows,col))
+        MatchFilter_WT = np.zeros((rows,col))
+        ACE_NT = np.zeros((rows,col))
+        ACE_WT = np.zeros((rows,col))
 
-    # save the tables in choosen coordinates
-    doc.add_paragraph("Values of (x'-m) for the following pixels locations, for the first band:")
-    add_table(t_i_NT, t_i_WT)
-    doc.add_paragraph("Match Filter:")
-    add_table(MatchFilter_NT, MatchFilter_WT)
-    doc.add_paragraph("ACE Filter:")
-    add_table(ACE_NT, ACE_WT)
+        for i in range(rows):
+            for j in range(col):
+                MatchFilter_NT[i,j] = np.dot(temp, t_i_NT[i, j, :])
+                MatchFilter_WT[i,j] = np.dot(temp, t_i_WT[i, j, :])
+        ACE_WT = ace_algorithm(cube, t_T, inv_covariance_matrix, t_i_WT)
+        ACE_NT = ace_algorithm(cube, t_T, inv_covariance_matrix, t_i_NT)
 
-    # Flatten the MatchFilter_NT and MatchFilter_WT arrays to 1D arrays for histogram plotting
-    MatchFilter_NT_flat = MatchFilter_NT.flatten()
-    MatchFilter_WT_flat = MatchFilter_WT.flatten()
-    ACE_WT_flat = ACE_WT.flatten()
-    ACE_NT_flat = ACE_NT.flatten()
-    bins = 100
-    # Histogram of Match Filter with/without target.
-    MF_NT_counts, MF_WT_counts = histogram_plot(MatchFilter_NT_flat, MatchFilter_WT_flat, "MatchFilter_NT_flat", "MatchFilter_WT_flat", bins)
-    ACE_NT_counts, ACE_WT_counts = histogram_plot(ACE_NT_flat, ACE_WT_flat, "ACE_Filter_NT_flat", "ACE_Filter_WT_flat", bins)
+        now = datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        print("Current Time =", current_time)
 
-    X, Y, n_bands = cube.shape
-    x_size = len(MatchFilter_WT)
-    y_size = len(MatchFilter_NT)
+        # # save the tables in choosen coordinates
+        # doc.add_paragraph("Values of (x'-m) for the following pixels locations, for the first band:")
+        # add_table(t_i_NT, t_i_WT)
+        # doc.add_paragraph("Match Filter:")
+        # add_table(MatchFilter_NT, MatchFilter_WT)
+        # doc.add_paragraph("ACE Filter:")
+        # add_table(ACE_NT, ACE_WT)
 
-    axs = np.linspace(-1000, 1500, bins+1)
+        # Flatten the MatchFilter_NT and MatchFilter_WT arrays to 1D arrays for histogram plotting
+        MatchFilter_NT_flat = MatchFilter_NT.flatten()
+        MatchFilter_WT_flat = MatchFilter_WT.flatten()
+        ACE_WT_flat = ACE_WT.flatten()
+        ACE_NT_flat = ACE_NT.flatten()
+        bins = 100
+        # Histogram of Match Filter with/without target.
+        MF_NT_counts, MF_WT_counts = histogram_plot(MatchFilter_NT_flat, MatchFilter_WT_flat, "Match Filter no target", "Match Filter with target", bins)
+        ACE_NT_counts, ACE_WT_counts = histogram_plot(ACE_NT_flat, ACE_WT_flat, "ACE Filter no target", "ACE Filter with target", bins)
 
-    Pd_MF = 1 - integrate.cumulative_trapezoid(MF_WT_counts, axs[:-1], initial=0) / (25 * X * Y)
-    Pfa_MF = 1 - integrate.cumulative_trapezoid(MF_NT_counts, axs[:-1], initial=0) / (25 * X * Y)
-    Pd_ACE = 1 - integrate.cumulative_trapezoid(ACE_WT_counts, axs[:-1], initial=0) / (25 * X * Y)
-    Pfa_ACE = 1 - integrate.cumulative_trapezoid(ACE_NT_counts, axs[:-1], initial=0) / (25 * X * Y)
+        X, Y, n_bands = cube.shape
+        x_size = len(MatchFilter_WT)
+        y_size = len(MatchFilter_NT)
 
+        axs = np.linspace(-1000, 1500, bins+1)
 
-    # Plot the ROC curve
-    plt.figure(figsize=(10, 6))
-    plt.plot(Pfa_MF, Pd_MF, label='ROC curve MF')
-    plt.plot(Pfa_ACE, Pd_ACE, label='ROC curve ACE')
-    plt.plot([0, 1], [0, 1], 'k--')  # Dashed diagonal
-    plt.xlim([0, 0.1])
-    plt.ylim([0, 1])
-    plt.xlabel('Pfa')
-    plt.ylabel('Pd')
-    plt.title(f"ROC Curve at Threshold = 0.1 target pixel - {target_pixel_str}")
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(f"plot{target_pixel_str}.png", bbox_inches='tight')
-    plt.close()  # Close the plot to avoid displaying it in the Python output
-    # Add the plot image to the Word document
-    doc.add_picture(f"plot{target_pixel_str}.png", width=Inches(6))
+        Pd_MF = 1 - integrate.cumulative_trapezoid(MF_WT_counts, axs[:-1], initial=0) / (25 * X * Y)
+        Pfa_MF = 1 - integrate.cumulative_trapezoid(MF_NT_counts, axs[:-1], initial=0) / (25 * X * Y)
+        Pd_ACE = 1 - integrate.cumulative_trapezoid(ACE_WT_counts, axs[:-1], initial=0) / (25 * X * Y)
+        Pfa_ACE = 1 - integrate.cumulative_trapezoid(ACE_NT_counts, axs[:-1], initial=0) / (25 * X * Y)
 
-    # Save the Word document
-doc.save('report3.docx')
+        # Plot ACE Inverse Cumulative Probability Distribution
+        fig, ax = plt.subplots()
+        plt.plot(axs[:-1], Pd_ACE, label='ACE Pd')
+        plt.plot(axs[:-1], Pfa_ACE, label='ACE Pfa')
+        plt.title('Inverse Cumulative Probability Distribution - ACE')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig("Inverse Cumulative_Probability_Distribution_ACE.png", bbox_inches='tight')
+        plt.close()  # Close the plot to avoid displaying it in the Python output
+        # Add the plot image to the Word document
+        doc.add_picture("Inverse Cumulative_Probability_Distribution_ACE.png", width=Inches(6))
+
+        # Plot MF Inverse Cumulative Probability Distribution
+        plt.figure(figsize=(10, 6))
+        plt.plot(axs[:-1], Pd_MF, label='MF Pd')
+        plt.plot(axs[:-1], Pfa_MF, label='MF Pfa')
+        plt.title('Inverse Cumulative Probability Distribution - MF')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig("Inverse_Cumulative_Probability_Distribution_MF.png", bbox_inches='tight')
+        plt.close()  # Close the plot to avoid displaying it in the Python output
+        # Add the plot image to the Word document
+        doc.add_picture("Inverse_Cumulative_Probability_Distribution_MF.png", width=Inches(6))
+
+        # Plot the ROC curves
+        plt.figure(figsize=(10, 6))
+        plt.plot(Pfa_MF, Pd_MF, label='ROC curve MF')
+        plt.plot(Pfa_ACE, Pd_ACE, label='ROC curve ACE')
+        plt.plot([0, 1], [0, 1], 'k--')  # Dashed diagonal
+        plt.xlim([0, 0.1])
+        plt.ylim([0, 1])
+        plt.xlabel('Pfa')
+        plt.ylabel('Pd')
+        plt.title(f"ROC Curve")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"plot{target_pixel_str}.png", bbox_inches='tight')
+        plt.close()  # Close the plot to avoid displaying it in the Python output
+        # Add the plot image to the Word document
+        doc.add_picture(f"plot{target_pixel_str}.png", width=Inches(6))
+
+        # Save the Word document
+doc.save('report_with_.docx')
 
