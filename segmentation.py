@@ -4,46 +4,8 @@ from skimage.color import label2rgb
 from sklearn.cluster import KMeans
 from spectral import *
 import pickle  # For saving the data
-
-
-def ace_algorithm(cube, t_T, invers_cov, x_m):
-
-    rows, cols, bands = cube.shape
-    ace_scores = np.zeros((rows, cols))
-    t = np.transpose(t_T)
-    # Flatten t_T if it's not a 1D array already
-    if t_T.ndim > 1:
-        t_T = t_T.flatten()
-
-    # Reshape x_m for matrix multiplication, if necessary
-    if x_m.shape != cube.shape:
-        x_m = x_m.reshape(cube.shape)
-
-    # Compute the part of the ACE algorithm that doesn't change per pixel
-    t_t_invers_cov = np.dot(t_T, invers_cov)
-
-    # Calculate the denominator for the ACE algorithm
-    denominator_t = np.dot(t_t_invers_cov, t)
-
-    for i in range(rows):
-        for j in range(cols):
-            # Select the pixel spectrum
-            pixel_spectrum = x_m[i, j, :]
-
-            # Calculate the numerator for the ACE algorithm
-            numerator = np.dot(t_t_invers_cov, pixel_spectrum)
-
-            # Calculate the denominator for the current pixel spectrum
-            phi_x_m = np.dot(invers_cov, pixel_spectrum)
-            denominator_x = np.dot(np.dot(denominator_t, pixel_spectrum), phi_x_m)
-
-            # Calculate ACE score for the pixel
-            if denominator_t > 0 and denominator_x > 0:
-                ace_scores[i, j] = (numerator ** 2) / (np.dot(denominator_t, denominator_x))
-            else:
-                ace_scores[i, j] = 0  # Handle the case of zero denominators
-
-    return ace_scores
+from docx import Document
+from matplotlib.patches import Patch
 
 
 def load_cube(hdr_path, dat_path):
@@ -53,6 +15,9 @@ def load_cube(hdr_path, dat_path):
     cube = numpy_ndarr.load().astype('float64')  # Load the entire cube as a numpy array
     return cube
 
+
+# Create a new Word Document
+doc = Document()
 # File paths
 hdr_path = "converted_cube.hdr"
 dat_path = "converted_cube.img"
@@ -82,10 +47,27 @@ for i in range(k):
 with open('mean_pixels.pkl', 'wb') as f:
     pickle.dump(mean_pixels, f)
 
-# Display the segmented image
-plt.figure()
-plt.title('Tait Segmented Image - 5 segments')
-plt.imshow(label2rgb(seg_map_struct))
-plt.show()
+# Assuming seg_map_struct is your segmentation map array with label indices
+labeled_image = label2rgb(seg_map_struct, bg_label=0)  # Specify bg_label if there's a background label
 
-print("Mean pixels for each cluster saved to 'mean_pixels.pkl'")
+# Reshape the labeled image for easier color extraction
+reshaped_image = labeled_image.reshape((-1, 3))
+unique_colors = np.unique(reshaped_image, axis=0)
+
+# Plot the image
+plt.figure(figsize=(10, 8))
+plt.imshow(labeled_image)
+plt.title('Tait Segmented Image')
+
+# Create legend patches
+from matplotlib.patches import Patch
+legend_handles = [Patch(color=unique_colors[i], label=f'Segment {i+1}') for i in range(len(unique_colors))]
+plt.legend(handles=legend_handles, loc='best')
+
+# Save and show plot
+plt.savefig('Segmented_img_with_legend.png', bbox_inches='tight')
+plt.close()
+
+doc.add_picture(f"Segmented_img.png")
+
+doc.save('segmentation.docx')

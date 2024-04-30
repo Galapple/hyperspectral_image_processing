@@ -11,6 +11,72 @@ import pickle
 from datetime import datetime
 
 
+def fix_corrupted_spectrum(corrupted_spectrum):
+    """
+    Fixes a corrupted spectrum by replacing zero values with the average of their four neighbors.
+
+    Parameters:
+    - corrupted_spectrum: A 1D numpy array where 10% of its elements are set to zero.
+
+    Returns:
+    - A numpy array where zero values have been replaced by the average of their four neighbors.
+    """
+    # Length of the spectrum
+    num_elements = len(corrupted_spectrum)
+
+    # Create a copy of the spectrum to modify
+    fixed_spectrum = np.copy(corrupted_spectrum)
+
+    # Iterate over each element of the spectrum
+    for i in range(num_elements):
+        # Check if the current element is zero
+        if fixed_spectrum[i] == 0:
+            # Initialize neighbors list
+            neighbors = []
+
+            # Check each of the four potential neighbors (two on each side)
+            if i > 0:  # Left neighbor
+                neighbors.append(corrupted_spectrum[i - 1])
+            if i < num_elements - 1:  # Right neighbor
+                neighbors.append(corrupted_spectrum[i + 1])
+            if i > 1:  # Second left neighbor
+                neighbors.append(corrupted_spectrum[i - 2])
+            if i < num_elements - 2:  # Second right neighbor
+                neighbors.append(corrupted_spectrum[i + 2])
+
+            # Calculate the average of the neighbors if any neighbors exist
+            if neighbors:
+                fixed_spectrum[i] = np.mean([n for n in neighbors if n != 0])
+
+    return fixed_spectrum
+
+
+def corrupt_spectrum(pixel_spectrum):
+    """
+    Randomly sets 10% of the elements in a pixel spectrum to zero.
+
+    Parameters:
+    - pixel_spectrum: A 1D numpy array representing the pixel spectrum.
+
+    Returns:
+    - A numpy array with 10% of its elements set to zero at random positions.
+    """
+    # Calculate the number of elements to set to zero
+    num_elements = len(pixel_spectrum)
+    num_to_zero = int(num_elements * 0.1)  # 10% of the elements
+
+    # Generate random indices to set to zero
+    indices_to_zero = np.random.choice(num_elements, num_to_zero, replace=False)
+
+    # Create a copy of the pixel spectrum to modify
+    corrupted_spectrum = np.copy(pixel_spectrum)
+
+    # Set the chosen indices to zero
+    corrupted_spectrum[indices_to_zero] = 0
+
+    return corrupted_spectrum
+
+
 def compute_cov_matrix(hyper_cube, m_cube):
     rows, cols, bands = hyper_cube.shape
     N = rows * cols  # Total number of pixels
@@ -185,7 +251,7 @@ def ace_algorithm(cube, t_T, invers_cov, x_m):
 
             # Calculate ACE score for the pixel
             if denominator_t > 0 and denominator_x > 0:
-                ace_scores[i, j] = (numerator ** 2) / (denominator_t * denominator_x)
+                ace_scores[i, j] = numerator / (denominator_t * denominator_x)
             else:
                 ace_scores[i, j] = 0  # Handle the case of zero denominators
 
@@ -214,7 +280,7 @@ filename = 'mean_pixels.pkl'
 # Load the mean pixels from the file
 with open(filename, 'rb') as f:
     mean_pixels = pickle.load(f)
-mean_pixels = [mean_pixels[3]]
+
 # Create a new Word Document
 doc = Document()
 
@@ -239,7 +305,7 @@ else:
     m_vector = np.load(m_vector_filepath)  # Load the m_vector from the file
 
 # p = 0.01  # Target strength
-Target_strength = [0.01, 0.02, 0.03]
+Target_strength = [0.015, 0.02]
 # calculate the target implant matrix
 t_i_NT_filepath = 't_i_NT.npy'  # Replace with your desired file path
 
@@ -256,22 +322,29 @@ print("calculate the target implant matrix")
 for p in Target_strength:
     doc.add_paragraph(f"Target strength {str(p)}")
     for i in range(len(mean_pixels)):
-        now = datetime.now()
-        current_time = now.strftime("%H:%M:%S")
-        print("Current Time =", current_time)
+
         # Target pixel location (2, 4) in zero-indexed coordinates is (4, 2) in (lines, samples)
         # target_pixel_location = targets[i]
         # target_pixel_str = str(target_pixel_location)
         # doc.add_paragraph(f"Target pixel {target_pixel_str}")
         # target_pixel_spectrum = cube[target_pixel_location[0], target_pixel_location[1], :]
         target_pixel_spectrum = mean_pixels[i]
-        target_pixel_str = f"mean pixel in segment 4"
+        target_pixel_str = f"mean pixel in segment {str(i+1)}"
         # Plot the spectrum of the target pixel
         plot_spectrum_graph(target_pixel_spectrum)
 
-        now = datetime.now()
-        current_time = now.strftime("%H:%M:%S")
-        print("Current Time =", current_time)
+
+        # # Corrupt target pixel
+        # target_pixel_str = f"corrupt_spectrum_target_{str(targets[i])}"
+        # plot_spectrum_graph(target_pixel_spectrum)
+        # target_pixel_spectrum = corrupt_spectrum(target_pixel_spectrum)
+        # plot_spectrum_graph(target_pixel_spectrum)
+        #
+        # # Smoothing corrupted pixel
+        # target_pixel_spectrum = fix_corrupted_spectrum(target_pixel_spectrum)
+        # target_pixel_str = "Corrupted target after smoothing technique"
+        # plot_spectrum_graph(target_pixel_spectrum)
+
 
         # x' = x - m +p*t
         t_i_WT = t_i_NT + p * target_pixel_spectrum
@@ -285,9 +358,6 @@ for p in Target_strength:
         t_T = target_pixel_spectrum.transpose()
         temp = np.dot(t_T, inv_covariance_matrix)
 
-        now = datetime.now()
-        current_time = now.strftime("%H:%M:%S")
-        print("Current Time =", current_time)
 
         MatchFilter_NT = np.zeros((rows,col))
         MatchFilter_WT = np.zeros((rows,col))
@@ -301,9 +371,7 @@ for p in Target_strength:
         ACE_WT = ace_algorithm(cube, t_T, inv_covariance_matrix, t_i_WT)
         ACE_NT = ace_algorithm(cube, t_T, inv_covariance_matrix, t_i_NT)
 
-        now = datetime.now()
-        current_time = now.strftime("%H:%M:%S")
-        print("Current Time =", current_time)
+
 
         # # save the tables in choosen coordinates
         # doc.add_paragraph("Values of (x'-m) for the following pixels locations, for the first band:")
@@ -376,5 +444,5 @@ for p in Target_strength:
         doc.add_picture(f"plot{target_pixel_str}.png", width=Inches(6))
 
         # Save the Word document
-doc.save('report_with_.docx')
+doc.save('run_3_4.docx')
 
